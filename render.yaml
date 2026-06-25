@@ -1,0 +1,13 @@
+# One-click deploy on Render (https://render.com).
+# New → Blueprint → connect the repo containing these files → Apply.
+# Render reads this file and configures everything; nothing to type.
+services:
+  - type: web
+    name: movie-night
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: "20"

@@ -1,0 +1,11 @@
+# Netlify hosts the PAGE (static). It cannot run the realtime room server
+# (server.js / WebSocket). Host that separately and point config.js at it.
+[build]
+  publish = "."
+  command = ""
+
+# single-page app: serve index.html for any path
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
