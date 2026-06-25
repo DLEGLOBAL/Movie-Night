@@ -116,6 +116,10 @@
   .screen video{width:100%; height:100%; object-fit:contain; background:#000; display:block}
   .screen #live,.screen #hostfile{position:absolute; inset:0; width:100%; height:100%; object-fit:contain; background:#000}
   .screen #reel{position:absolute; inset:0; width:100%; height:100%; display:block}
+  .screen #ytwrap{position:absolute; inset:0}
+  .screen #ytwrap.hidden{display:none}
+  .screen #ytplayer,.screen #ytplayer iframe{width:100%; height:100%; border:0; display:block}
+  .yt-guard{position:absolute; inset:0; z-index:4; cursor:default}   /* keeps playback host-controlled + captures the gesture for autoplay */
   .livebadge{position:absolute; top:12px; right:12px; z-index:6; background:var(--red); color:#fff;
     font-size:11px; font-weight:900; letter-spacing:.6px; padding:4px 10px; border-radius:999px;
     box-shadow:0 2px 10px rgba(226,59,78,.5); animation:pulse 1.6s infinite}
@@ -208,6 +212,8 @@
   .gobox .hd .live-dot{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red)}
   .gobox p.tiny{margin:0 0 11px}
   .gobtns{display:grid; grid-template-columns:1fr 1fr; gap:8px}
+  .svcrow{display:flex; gap:8px; margin-top:8px}
+  .svcrow .btn{flex:1; padding:9px 6px; font-size:13px}
   .gobtns .btn{padding:11px 10px; font-size:13px}
   .gobtns .btn.wide{grid-column:1 / -1}
   .urlrow{display:flex; gap:8px; margin-top:8px}
@@ -398,6 +404,7 @@
         <video id="live" class="hidden" playsinline autoplay></video>
         <video id="hostfile" class="hidden" playsinline controls></video>
         <canvas id="reel" class="hidden"></canvas>
+        <div id="ytwrap" class="hidden"><div id="ytplayer"></div><div class="yt-guard" id="ytGuard"></div></div>
         <div class="reel-note hidden" id="reelNote">▶ Preview reel — stream blocked, playing synced placeholder</div>
         <div class="empty" id="emptyScreen">
           <div class="big">🍿</div>
@@ -928,6 +935,7 @@ function updateScreen(){
   if(b.active){
     $("#liveBadge").classList.remove("hidden");
     exitReel(); video.style.visibility="hidden";
+    $("#ytwrap").classList.add("hidden"); if(ytPlayer&&ytReady){ try{ytPlayer.pauseVideo()}catch(e){} }
     const iAmCaster = me.host && b.by===me.id;
     if(iAmCaster && b.kind==="file"){ hf.classList.remove("hidden"); lv.classList.add("hidden"); $("#emptyScreen").classList.add("hidden"); }
     else if(iAmCaster){ lv.classList.remove("hidden"); hf.classList.add("hidden"); $("#emptyScreen").classList.add("hidden"); }
@@ -940,10 +948,21 @@ function updateScreen(){
     renderBroadcastPanel(); maybeShowUnmute();
     return;
   }
-  // no broadcast -> normal catalog/reel pipeline
+  // no broadcast -> YouTube, else catalog/reel pipeline
   $("#liveBadge").classList.add("hidden");
-  $("#unmuteHint").classList.add("hidden");
   lv.classList.add("hidden"); hf.classList.add("hidden");
+  if(curIsYouTube()){
+    exitReel(); video.style.visibility="hidden"; $("#emptyScreen").classList.add("hidden");
+    $("#ytwrap").classList.remove("hidden");
+    ensureYT(curMovie().ytId);
+    $("#nowTitle").textContent="YouTube";
+    $("#unmuteHint").classList.toggle("hidden", ytUnmuted);   // muted autoplay → tap for sound
+    syncYouTube();
+    renderBroadcastPanel();
+    return;
+  }
+  $("#ytwrap").classList.add("hidden"); if(ytPlayer&&ytReady){ try{ytPlayer.pauseVideo()}catch(e){} }
+  $("#unmuteHint").classList.add("hidden");
   resetEmptyDefaults();
   loadVideo(); syncVideo();
   renderBroadcastPanel();
@@ -979,24 +998,42 @@ function renderBroadcastPanel(){
     $("#stopBroadcast").onclick=stopBroadcast;
   } else {
     box.innerHTML=`<div class="gobox">
-      <div class="hd"><span class="live-dot"></span>Host broadcast
-        <span style="color:var(--muted);font-weight:600;font-size:11px">— you're the room owner</span></div>
-      <p class="tiny">Play your own video to the whole room in real time, or share a tab/screen (great for any streaming site). Guests watch live.</p>
+      <div class="hd"><span class="live-dot"></span>Put something on the screen
+        <span style="color:var(--muted);font-weight:600;font-size:11px">— you're the host</span></div>
+
+      <div class="section-h" style="margin:2px 0 7px">🍿 Free movies</div>
+      <div class="urlrow">
+        <input id="ytInput" placeholder="Paste a YouTube link → plays for everyone" autocomplete="off"/>
+        <button class="btn" id="goYt" style="flex:0 0 auto">▶ Play</button>
+      </div>
+      <div class="svcrow">
+        <button class="btn ghost" id="svcTubi">Tubi</button>
+        <button class="btn ghost" id="svcPluto">Pluto</button>
+        <button class="btn ghost" id="svcYt">YouTube</button>
+      </div>
+      <p class="tiny" style="margin-top:7px">YouTube plays <b>in-app, in sync</b>. Tubi &amp; Pluto have tons of free urban + comedy — open one, then <b>Share screen / tab</b> below.</p>
+
+      <div class="section-h" style="margin:14px 0 7px">Or broadcast your own</div>
       <div class="gobtns">
         <button class="btn" id="goFile">🎬 Play a video file</button>
         <button class="btn ghost" id="goScreen">🖥️ Share screen / tab</button>
       </div>
-      <div class="urlrow">
-        <input id="urlInput" placeholder="…or paste a video URL (.mp4)" autocomplete="off"/>
+      <div class="urlrow" style="margin-top:8px">
+        <input id="urlInput" placeholder="…or paste a direct video URL (.mp4)" autocomplete="off"/>
         <button class="btn ghost" id="goUrl" style="flex:0 0 auto">Load</button>
       </div>
-      <button class="btn ghost" id="browseFilms" style="width:100%;margin-top:8px">🎬 Browse free films (real classics)</button>
-      <p class="tiny" style="margin-top:8px">Tip: for new releases, “Share screen / tab” your own streaming service (tick “Share tab audio”).</p>
+      <button class="btn ghost" id="browseFilms" style="width:100%;margin-top:8px">🎞️ Browse free classics (public domain)</button>
     </div>`;
+    const loadSmart=(v)=>{ if(parseYouTube(v)) setYouTube(v); else setCustomUrl(v); };
+    $("#goYt").onclick=()=>setYouTube($("#ytInput").value);
+    $("#ytInput").addEventListener("keydown",e=>{ if(e.key==="Enter") setYouTube($("#ytInput").value); });
+    $("#svcTubi").onclick=()=>{ window.open("https://tubitv.com/category/comedy","_blank","noopener"); toast("Opened Tubi — pick a movie, then “Share screen / tab” 🖥️"); };
+    $("#svcPluto").onclick=()=>{ window.open("https://pluto.tv/en/on-demand","_blank","noopener"); toast("Opened Pluto — pick a movie, then “Share screen / tab” 🖥️"); };
+    $("#svcYt").onclick=()=>{ window.open("https://www.youtube.com/results?search_query=free+full+comedy+movie","_blank","noopener"); toast("Find a free movie, then paste its link in the box above ▶️"); };
     $("#goFile").onclick=()=>$("#fileInput").click();
     $("#goScreen").onclick=startBroadcastScreen;
-    $("#goUrl").onclick=()=>setCustomUrl($("#urlInput").value);
-    $("#urlInput").addEventListener("keydown",e=>{ if(e.key==="Enter") setCustomUrl($("#urlInput").value); });
+    $("#goUrl").onclick=()=>loadSmart($("#urlInput").value);
+    $("#urlInput").addEventListener("keydown",e=>{ if(e.key==="Enter") loadSmart($("#urlInput").value); });
     const bf=$("#browseFilms"); if(bf) bf.onclick=openFilms;
   }
 }
@@ -1222,6 +1259,72 @@ function renderCamGrid(){
 }
 
 /* =======================================================================
+   YOUTUBE  —  free movies / videos, embedded & synced via the official IFrame API.
+   (YouTube officially supports embedding; Tubi/Pluto don't, so those use screen-share.)
+   ======================================================================= */
+let ytPlayer=null, ytApiReady=false, ytReady=false, ytPending=null, ytCurId=null, ytUnmuted=false;
+(function loadYT(){
+  if(window.YT && window.YT.Player){ ytApiReady=true; return; }
+  window.onYouTubeIframeAPIReady=()=>{ ytApiReady=true; if(ytPending){ ensureYT(ytPending); ytPending=null; } };
+  const s=document.createElement("script"); s.src="https://www.youtube.com/iframe_api"; document.head.appendChild(s);
+})();
+function parseYouTube(url){
+  if(!url) return null; url=String(url).trim();
+  if(/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+  let m;
+  if((m=url.match(/[?&]v=([a-zA-Z0-9_-]{11})/))) return m[1];
+  if((m=url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/))) return m[1];
+  if((m=url.match(/youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|v)\/([a-zA-Z0-9_-]{11})/))) return m[1];
+  return null;
+}
+function ensureYT(videoId){
+  if(!ytApiReady){ ytPending=videoId; return; }
+  if(!ytPlayer){
+    ytPlayer=new YT.Player("ytplayer",{
+      videoId, host:"https://www.youtube-nocookie.com",
+      playerVars:{ controls:0, disablekb:1, modestbranding:1, rel:0, playsinline:1, fs:0, iv_load_policy:3,
+        autoplay:1, mute:1 },   // muted autoplay always works; one tap turns the sound on
+      events:{
+        onReady:()=>{ ytReady=true; ytCurId=videoId; syncYouTube(); },
+        onError:()=>{ toast("That video can't be embedded — use “Share screen / tab” to play it from YouTube"); }
+      }
+    });
+    ytCurId=videoId;
+  } else if(ytCurId!==videoId){
+    ytCurId=videoId; try{ ytPlayer.loadVideoById(videoId); ytReady=true; }catch(e){}
+  }
+}
+function curIsYouTube(){ const mv=curMovie(); return !!(mv && mv.kind==="youtube"); }
+function syncYouTube(){
+  if(!ytPlayer || !ytReady || !curIsYouTube()) return;
+  const want=targetPosition();
+  let cur=0; try{ cur=ytPlayer.getCurrentTime()||0; }catch(e){}
+  if(Math.abs(cur-want)>1.2 && isFinite(want)){ try{ ytPlayer.seekTo(want,true); }catch(e){} }
+  let st=-1; try{ st=ytPlayer.getPlayerState(); }catch(e){}     // 1 playing · 2 paused
+  if(state.playback.playing && st!==1){ try{ ytPlayer.playVideo(); }catch(e){} }
+  if(!state.playback.playing && st===1){ try{ ytPlayer.pauseVideo(); }catch(e){} }
+}
+function setYouTube(url){
+  if(!requireHost()) return;
+  const id=parseYouTube(url);
+  if(!id){ toast("Paste a YouTube link (youtube.com/watch?v=… or youtu.be/…) 🎬"); return; }
+  ytUnmuted=false;
+  state.customSrc={ kind:"youtube", ytId:id, title:"YouTube" };
+  state.movieId="custom";
+  state.playback={ playing:true, position:0, at:Date.now() };
+  bumpState();
+  sysMsg(me.name+" put a YouTube video on the screen ▶️");
+  toast("Loaded — playing for everyone in sync ▶️");
+}
+/* host taps the screen = play/pause; guest taps = enable sound */
+function ytGuardTap(){            // tap the video = turn sound on (everyone); play/pause is the transport bar
+  if(!curIsYouTube()) return;
+  ytUnmuted=true;
+  try{ ytPlayer&&ytPlayer.unMute&&ytPlayer.unMute(); ytPlayer&&ytPlayer.playVideo&&ytPlayer.playVideo(); }catch(e){}
+  $("#unmuteHint").classList.add("hidden");
+}
+
+/* =======================================================================
    VIDEO  /  PLAYBACK SYNC
    ======================================================================= */
 const video=$("#video");
@@ -1234,16 +1337,22 @@ let stallTimer=null;
 let userSeeking=false;
 
 function curMovie(){
-  if(state.movieId==="custom" && state.customSrc)
-    return { id:"custom", title:state.customSrc.title||"Your link", emoji:"🎞️", genre:"Custom link",
+  if(state.movieId==="custom" && state.customSrc){
+    if(state.customSrc.kind==="youtube")
+      return { id:"custom", kind:"youtube", ytId:state.customSrc.ytId, title:state.customSrc.title||"YouTube",
+               emoji:"▶️", genre:"YouTube", rt:"", secs:0, c1:"#ff3b3b", c2:"#330000",
+               grad:"linear-gradient(160deg,#ff3b3b,#330000)", src:"" };
+    return { id:"custom", kind:"url", title:state.customSrc.title||"Your link", emoji:"🎞️", genre:"Custom link",
              rt:"", secs:1800, c1:"#5aa9ff", c2:"#10243f",
              grad:"linear-gradient(160deg,#5aa9ff,#10243f)", src:state.customSrc.src };
+  }
   return MOVIES.find(m=>m.id===state.movieId)||null;
 }
 
 /* the playback duration we trust: real video if it loaded, else the movie's runtime */
 function currentDuration(){
   const mv=curMovie(); if(!mv) return 0;
+  if(mv.kind==="youtube"){ try{ return (ytPlayer && ytReady && ytPlayer.getDuration()) || 0; }catch(e){ return 0; } }
   if(!reelMode && video.duration && isFinite(video.duration)) return video.duration;
   return mv.secs;
 }
@@ -1336,7 +1445,7 @@ function updateSyncFlag(){
   const n=Object.keys(participants).length;
   if(state.broadcast.active){ el.textContent="🔴 Live · "+n+" watching"; dot.style.background="var(--red)"; dot.style.boxShadow="0 0 8px var(--red)"; return; }
   if(!curMovie()){ el.textContent="Idle"; dot.style.background="var(--muted)"; dot.style.boxShadow="none"; return; }
-  const drift = reelMode ? 0 : Math.abs((video.currentTime||0)-targetPosition());
+  const drift = (reelMode||curIsYouTube()) ? 0 : Math.abs((video.currentTime||0)-targetPosition());
   if(drift>1.2){ el.textContent="Re-syncing…"; dot.style.background="var(--gold)"; dot.style.boxShadow="0 0 8px var(--gold)"; }
   else { el.textContent="In sync · "+n+(n===1?" watching":" watching"); dot.style.background="var(--green)"; dot.style.boxShadow="0 0 8px var(--green)"; }
 }
@@ -1656,8 +1765,12 @@ $("#fileInput").addEventListener("change",e=>{
   const f=e.target.files&&e.target.files[0]; e.target.value="";
   if(f) startBroadcastFromFile(f);
 });
-/* guest: tap to unmute the live stream */
-$("#unmuteHint").onclick=()=>{ const lv=$("#live"); lv.muted=false; lv.play().catch(()=>{}); maybeShowUnmute(); };
+/* guest: tap to unmute the live stream (or the YouTube video) */
+$("#unmuteHint").onclick=()=>{
+  if(curIsYouTube()){ ytUnmuted=true; try{ ytPlayer&&ytPlayer.unMute&&ytPlayer.unMute(); ytPlayer&&ytPlayer.playVideo&&ytPlayer.playVideo(); }catch(e){} $("#unmuteHint").classList.add("hidden"); return; }
+  const lv=$("#live"); lv.muted=false; lv.play().catch(()=>{}); maybeShowUnmute();
+};
+$("#ytGuard").onclick=ytGuardTap;   // host: tap screen = play/pause · guest: tap = sound
 
 /* autoplay-audio safety net: any interaction resumes paused camera tiles (so you can hear everyone) */
 document.addEventListener("pointerdown",()=>{
@@ -1785,7 +1898,9 @@ if(location.hash.length>1){ $("#joinCode").value=location.hash.slice(1).toUpperC
    ======================================================================= */
 setInterval(()=>{
   if(!room) return;
-  if(curMovie() && !reelMode && state.playback.playing){
+  if(curIsYouTube()){
+    syncYouTube();
+  } else if(curMovie() && !reelMode && state.playback.playing){
     const drift=Math.abs((video.currentTime||0)-targetPosition());
     if(drift>0.6) syncVideo();
   }

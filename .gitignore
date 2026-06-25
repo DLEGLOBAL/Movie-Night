@@ -1,0 +1,8 @@
+# local-only / generated — never deploy these
+node_modules/
+cloudflared.exe
+cf.log
+phone-url.txt
+*.zip
+share-to-phone.ps1
+share-to-phone.cmd
