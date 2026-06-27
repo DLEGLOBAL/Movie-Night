@@ -214,6 +214,25 @@
   .gobtns{display:grid; grid-template-columns:1fr 1fr; gap:8px}
   .svcrow{display:flex; gap:8px; margin-top:8px}
   .svcrow .btn{flex:1; padding:9px 6px; font-size:13px}
+  .btn.svc-off{opacity:.55} .btn.svc-off small{font-weight:600; opacity:.8}
+
+  /* ---- fullscreen / expand (works on every device incl. iPhone via CSS fill) ---- */
+  .fs-btn{position:absolute; bottom:12px; right:12px; z-index:8; width:38px; height:38px; border-radius:10px;
+    border:1px solid var(--line); background:rgba(10,10,16,.7); color:var(--ink); font-size:16px; cursor:pointer;
+    display:grid; place-items:center; backdrop-filter:blur(6px)}
+  .fs-btn:hover{border-color:var(--gold); color:var(--gold)}
+  .cam-fs{margin-left:auto; border:1px solid var(--line); background:var(--panel2); color:var(--ink);
+    border-radius:10px; width:38px; height:38px; font-size:15px; cursor:pointer}
+  .cam-fs:hover{border-color:var(--gold); color:var(--gold)}
+  .expanded{position:fixed !important; inset:0 !important; z-index:600 !important; width:auto !important;
+    height:auto !important; max-width:none !important; min-height:0 !important; margin:0 !important;
+    border-radius:0 !important; aspect-ratio:auto !important; background:#000}
+  .cam-grid.expanded{padding:18px; gap:14px; overflow:auto; align-content:center;
+    grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); background:var(--bg)}
+  #fsExit{position:fixed; top:14px; right:14px; z-index:601; display:none; align-items:center; gap:7px;
+    background:rgba(10,10,16,.9); border:1px solid var(--gold); color:var(--ink); border-radius:999px;
+    padding:9px 15px; font-size:13px; font-weight:800; cursor:pointer; box-shadow:var(--shadow)}
+  #fsExit.show{display:flex}
   .gobtns .btn{padding:11px 10px; font-size:13px}
   .gobtns .btn.wide{grid-column:1 / -1}
   .urlrow{display:flex; gap:8px; margin-top:8px}
@@ -398,6 +417,7 @@
       <div class="screen">
         <div class="syncflag"><span class="dot"></span><span id="syncTxt">In sync</span></div>
         <div class="livebadge hidden" id="liveBadge">● LIVE</div>
+        <button class="fs-btn" id="fsScreen" title="Fullscreen">⛶</button>
         <button class="unmute-hint hidden" id="unmuteHint">🔇 Tap for sound</button>
         <div class="reactions-layer" id="reactLayer"></div>
         <video id="video" playsinline preload="metadata"></video>
@@ -554,6 +574,7 @@
   </div>
 </div>
 
+<button id="fsExit">✕ Exit fullscreen</button>
 <div class="toast-wrap" id="toastWrap"></div>
 
 <script src="config.js"></script>
@@ -846,7 +867,12 @@ async function startBroadcastFromFile(file){
   if(!stream){ toast("This browser can't capture a file stream — try Share screen instead"); return; }
   beginBroadcast(stream, "file", file.name.replace(/\.[^.]+$/,""));
 }
+const canScreenShare = ()=> !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
 async function startBroadcastScreen(){
+  if(!canScreenShare()){
+    toast("📱 Screen share isn't available on phones. On mobile, play a YouTube link or a video file instead — or host from a computer.");
+    return;
+  }
   let stream;
   try{ stream=await navigator.mediaDevices.getDisplayMedia({video:true, audio:true}); }
   catch(e){ return; }                       // user canceled the picker
@@ -1016,7 +1042,7 @@ function renderBroadcastPanel(){
       <div class="section-h" style="margin:14px 0 7px">Or broadcast your own</div>
       <div class="gobtns">
         <button class="btn" id="goFile">🎬 Play a video file</button>
-        <button class="btn ghost" id="goScreen">🖥️ Share screen / tab</button>
+        <button class="btn ghost ${canScreenShare()?'':'svc-off'}" id="goScreen">🖥️ Share screen${canScreenShare()?' / tab':' <small>(computer only)</small>'}</button>
       </div>
       <div class="urlrow" style="margin-top:8px">
         <input id="urlInput" placeholder="…or paste a direct video URL (.mp4)" autocomplete="off"/>
@@ -1205,10 +1231,12 @@ function closeCamPC(id){
 /* ---- rendering (reconcile, so streams don't flicker on every presence ping) ---- */
 function renderCamToolbar(){
   const tb=$("#camToolbar"); if(!tb) return;
+  const fsBtn=`<button class="cam-fs" id="camFs" title="Fullscreen cameras">⛶</button>`;
   if(!localCamStream){
     tb.innerHTML=`<button class="cam-btn on" id="camStart">📷 Start camera &amp; mic</button>
-      <span class="tiny" style="color:var(--muted)">${camSecure()?"join the room's video chat":"needs https / the phone URL"}</span>`;
+      <span class="tiny" style="color:var(--muted)">${camSecure()?"join the room's video chat":"needs https / the phone URL"}</span>`+fsBtn;
     $("#camStart").onclick=joinCams;
+    $("#camFs").onclick=()=>expandEl($("#camGrid"));
     return;
   }
   tb.innerHTML=`
@@ -1217,11 +1245,12 @@ function renderCamToolbar(){
     <select class="cam-effect" id="camEffectSel" title="Camera effect">
       ${CAM_EFFECTS.map(e=>`<option value="${e.id}" ${e.id===camEffect?'selected':''}>✨ ${e.name}</option>`).join("")}
     </select>
-    <button class="cam-btn stop" id="camLeave" title="Turn camera &amp; mic off">✕</button>`;
+    <button class="cam-btn stop" id="camLeave" title="Turn camera &amp; mic off">✕</button>`+fsBtn;
   $("#camToggle").onclick=toggleCamera;
   $("#micToggle").onclick=toggleMic;
   $("#camEffectSel").onchange=e=>setCamEffect(e.target.value);
   $("#camLeave").onclick=leaveCams;
+  $("#camFs").onclick=()=>expandEl($("#camGrid"));
 }
 function makeCamTile(id){
   const d=document.createElement("div"); d.className="cam-tile"; d.dataset.id=id;
@@ -1770,7 +1799,21 @@ $("#unmuteHint").onclick=()=>{
   if(curIsYouTube()){ ytUnmuted=true; try{ ytPlayer&&ytPlayer.unMute&&ytPlayer.unMute(); ytPlayer&&ytPlayer.playVideo&&ytPlayer.playVideo(); }catch(e){} $("#unmuteHint").classList.add("hidden"); return; }
   const lv=$("#live"); lv.muted=false; lv.play().catch(()=>{}); maybeShowUnmute();
 };
-$("#ytGuard").onclick=ytGuardTap;   // host: tap screen = play/pause · guest: tap = sound
+$("#ytGuard").onclick=ytGuardTap;   // tap YouTube = sound
+
+/* ---- fullscreen / expand: the movie screen OR the camera pane, on any device ---- */
+let expandedEl=null;
+function fsRequest(el){ const r=el.requestFullscreen||el.webkitRequestFullscreen; if(r){ try{ r.call(el); }catch(e){} } }
+function fsExitReal(){ const fe=document.fullscreenElement||document.webkitFullscreenElement, x=document.exitFullscreen||document.webkitExitFullscreen; if(fe&&x){ try{ x.call(document); }catch(e){} } }
+function collapseEl(){ if(expandedEl){ expandedEl.classList.remove("expanded"); expandedEl=null; if(reelMode) sizeReel(); } $("#fsExit").classList.remove("show"); fsExitReal(); }
+function expandEl(el){ if(!el) return; if(expandedEl===el){ collapseEl(); return; } collapseEl(); expandedEl=el; el.classList.add("expanded"); $("#fsExit").classList.add("show"); if(reelMode) sizeReel(); fsRequest(el); }
+$("#fsScreen").onclick=()=>expandEl($(".screen"));
+$("#fsExit").onclick=collapseEl;
+document.addEventListener("keydown",e=>{ if(e.key==="Escape" && expandedEl) collapseEl(); });
+["fullscreenchange","webkitfullscreenchange"].forEach(ev=>document.addEventListener(ev,()=>{
+  const fe=document.fullscreenElement||document.webkitFullscreenElement;
+  if(!fe && expandedEl){ expandedEl.classList.remove("expanded"); expandedEl=null; $("#fsExit").classList.remove("show"); if(reelMode) sizeReel(); }
+}));
 
 /* autoplay-audio safety net: any interaction resumes paused camera tiles (so you can hear everyone) */
 document.addEventListener("pointerdown",()=>{
